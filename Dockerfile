@@ -73,15 +73,17 @@ COPY --from=katago-builder \
 RUN chmod +x /app/bin/katago
 
 RUN curl -L --fail --retry 3 \
+"https://media.katagotraining.org/uploaded/networks/models/kata1/kata1-b6c96-s65341184-d9428755.txt.gz" \
 
-     "https://media.katagotraining.org/uploaded/networks/models/kata1/kata1-b6c96-s65341184-d9428755.txt.gz" \
-
-    ENV KATAGO_MODEL=/app/models/model.txt.gz
+    -o /app/models/model.txt.gz
 
 ENV KATAGO_BIN=/app/bin/katago
 
-ENV KATAGO_MODEL=/app/models/model.bin.gz
+ENV KATAGO_MODEL=/app/models/model.txt.gz
 
 ENV KATAGO_CONFIG=/app/config/analysis.cfg
+ENV KATAGO_MODEL=/app/models/model.bin.gz
+
+
 
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
