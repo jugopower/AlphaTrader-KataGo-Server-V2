@@ -1,16 +1,20 @@
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI
 
 from pydantic import BaseModel, Field
 
+from app.katago_engine import KataGoEngine
+
 app = FastAPI(
 
     title="AlphaTrader KataGo Server V2",
 
-    version="0.1.5",
+    version="0.1.6",
 
 )
+
+engine = KataGoEngine()
 
 class AnalyzeRequest(BaseModel):
 
@@ -20,29 +24,11 @@ class AnalyzeRequest(BaseModel):
 
     next_player: Literal["B", "W"] = "B"
 
-class AnalyzeResponse(BaseModel):
-
-    status: str
-
-    build: str
-
-    mode: str
-
-    board_size: int
-
-    move_count: int
-
-    next_player: str
-
-    black_winrate: float
-
-    white_winrate: float
-
-    message: str
+    komi: float = 7.5
 
 @app.get("/")
 
-def root():
+def root() -> dict[str, Any]:
 
     return {
 
@@ -50,62 +36,56 @@ def root():
 
         "service": "AlphaTrader KataGo Server V2",
 
-        "build": "Build019.5",
+        "build": "Build019.6",
 
     }
 
 @app.get("/health")
 
-def health():
+def health() -> dict[str, Any]:
+
+    readiness = engine.readiness()
 
     return {
 
         "status": "healthy",
 
-        "build": "Build019.5",
+        "build": "Build019.6",
+
+        "engine_ready": readiness["ready"],
 
     }
 
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.get("/engine-status")
 
-def analyze(request: AnalyzeRequest):
+def engine_status() -> dict[str, Any]:
 
-    move_count = len(request.moves)
+    return {
 
-    adjustment = min(move_count * 0.001, 0.08)
+        "status": "ok",
 
-    black_winrate = 0.50
+        "build": "Build019.6",
 
-    if request.next_player == "B":
+        "engine": engine.readiness(),
 
-        black_winrate += adjustment
+    }
 
-    else:
+@app.post("/analyze")
 
-        black_winrate -= adjustment
+def analyze(request: AnalyzeRequest) -> dict[str, Any]:
 
-    black_winrate = round(max(0.01, min(0.99, black_winrate)), 3)
-
-    white_winrate = round(1.0 - black_winrate, 3)
-
-    return AnalyzeResponse(
-
-        status="ok",
-
-        build="Build019.5",
-
-        mode="demo",
+    result = engine.analyze(
 
         board_size=request.board_size,
 
-        move_count=move_count,
+        moves=request.moves,
 
         next_player=request.next_player,
 
-        black_winrate=black_winrate,
-
-        white_winrate=white_winrate,
-
-        message="API 已正常運作；目前為示範分析，尚未連接真正 KataGo 引擎。",
+        komi=request.komi,
 
     )
+
+    result["build"] = "Build019.6"
+
+    return result
