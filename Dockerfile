@@ -49,7 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
 
     zlib1g \
-    libzip4 \
+    libzip5 \
     libstdc++6 \
 
     && rm -rf /var/lib/apt/lists/*
