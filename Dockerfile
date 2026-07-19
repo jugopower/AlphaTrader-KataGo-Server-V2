@@ -82,7 +82,7 @@ ENV KATAGO_BIN=/app/bin/katago
 ENV KATAGO_MODEL=/app/models/model.txt.gz
 
 ENV KATAGO_CONFIG=/app/config/analysis.cfg
-ENV KATAGO_MODEL=/app/models/model.bin.gz
+
 
 
 
