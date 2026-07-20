@@ -1,20 +1,36 @@
 from typing import Any, Literal
 
 from fastapi import FastAPI
-
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.katago_engine import KataGoEngine
 
-app = FastAPI(
+app = FastAPI(title="AlphaTrader KataGo Server V2",
 
-    title="AlphaTrader KataGo Server V2",
+    version="0.1.9",)
+app.add_middleware(
 
-    version="0.1.6",
+    CORSMiddleware,
+
+    allow_origins=["*"],
+
+    allow_credentials=False,
+
+    allow_methods=["*"],
+
+    allow_headers=["*"],
 
 )
 
+
+
 engine = KataGoEngine()
+    
+
+
+
+
 
 class AnalyzeRequest(BaseModel):
 
