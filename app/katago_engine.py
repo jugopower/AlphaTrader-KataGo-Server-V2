@@ -60,11 +60,15 @@ class KataGoEngine:
 
         board_size: int,
 
-        moves: list[str],
+        moves: list[Any],
+
+        initial_stones: list[dict[str, str]],
 
         next_player: str,
 
         komi: float = 7.5,
+
+        max_visits: int = 50,
 
     ) -> dict[str, Any]:
 
@@ -78,7 +82,7 @@ class KataGoEngine:
 
                 "mode": "katago",
 
-                "message": "KataGo 執行檔、模型或設定檔尚未完整安裝。",
+                "message": "KataGo å·è¡æªãæ¨¡åæè¨­å®æªå°æªå®æ´å®è£ã",
 
                 "readiness": readiness,
 
@@ -90,7 +94,7 @@ class KataGoEngine:
 
             "moves": self._convert_moves(moves),
 
-            "initialStones": [],
+            "initialStones": self._convert_initial_stones(initial_stones),
 
             "rules": "tromp-taylor",
 
@@ -102,7 +106,7 @@ class KataGoEngine:
 
             "includePolicy": True,
 
-            "maxVisits": 50,
+            "maxVisits": max(1, min(int(max_visits), 5000)),
 
         }
 
@@ -146,7 +150,7 @@ class KataGoEngine:
 
                 "mode": "katago",
 
-                "message": "KataGo 分析逾時。",
+                "message": "KataGo åæé¾æã",
 
             }
 
@@ -158,7 +162,7 @@ class KataGoEngine:
 
                 "mode": "katago",
 
-                "message": "KataGo 執行失敗。",
+                "message": "KataGo å·è¡å¤±æã",
 
                 "stderr": process.stderr[-1000:],
 
@@ -178,7 +182,7 @@ class KataGoEngine:
 
                 "mode": "katago",
 
-                "message": "KataGo 沒有回傳分析結果。",
+                "message": "KataGo æ²æåå³åæçµæã",
 
             }
 
@@ -210,14 +214,46 @@ class KataGoEngine:
 
     @staticmethod
 
-    def _convert_moves(moves: list[str]) -> list[list[str]]:
+    def _convert_moves(moves: list[Any]) -> list[list[str]]:
 
         converted: list[list[str]] = []
 
-        for index, coordinate in enumerate(moves):
+        for index, move in enumerate(moves):
 
-            color = "B" if index % 2 == 0 else "W"
+            if isinstance(move, dict):
+
+                color = str(move.get("color", "B")).upper()
+
+                coordinate = str(move.get("coordinate", "pass"))
+
+            elif isinstance(move, (list, tuple)) and len(move) >= 2:
+
+                color, coordinate = str(move[0]).upper(), str(move[1])
+
+            else:
+
+                color = "B" if index % 2 == 0 else "W"
+
+                coordinate = str(move)
 
             converted.append([color, coordinate])
+
+        return converted
+
+    @staticmethod
+
+    def _convert_initial_stones(stones: list[dict[str, str]]) -> list[list[str]]:
+
+        converted: list[list[str]] = []
+
+        for stone in stones:
+
+            color = str(stone.get("color", "B")).upper()
+
+            coordinate = str(stone.get("coordinate", ""))
+
+            if color in {"B", "W"} and coordinate:
+
+                converted.append([color, coordinate])
 
         return converted
