@@ -187,9 +187,36 @@ class KataGoEngine:
             }
 
         result = json.loads(output_lines[-1])
+if result.get("error"):
 
-        root_info = result.get("rootInfo", {})
+    return {
 
+        "status": "error",
+
+        "mode": "katago",
+
+        "message": result.get("error"),
+
+        "katago_raw": result,
+
+    }
+
+root_info = result.get("rootInfo", {})
+move_infos = result.get("moveInfos", [])
+
+if not move_infos:
+
+    return {
+
+        "status": "error",
+
+        "mode": "katago",
+
+        "message": "KataGo 沒有回傳推薦落點",
+
+        "katago_raw": result,
+
+    }
         return {
 
             "status": "ok",
@@ -208,7 +235,7 @@ class KataGoEngine:
 
             "visits": root_info.get("visits"),
 
-            "move_infos": result.get("moveInfos", []),
+            "move_infos": move_infos,
 
         }
 
