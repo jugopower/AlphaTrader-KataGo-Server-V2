@@ -206,36 +206,21 @@ move_infos = result.get("moveInfos", [])
 
 if not move_infos:
     return {
-
         "status": "error",
-
         "mode": "katago",
-
         "message": "KataGo 沒有回傳推薦落點",
-
         "katago_raw": result,
-
-    }
-        return {
-
+    }       
+ return {
             "status": "ok",
-
             "mode": "katago",
-
             "board_size": board_size,
-
             "move_count": len(moves),
-
             "next_player": next_player,
-
             "winrate": root_info.get("winrate"),
-
             "score_lead": root_info.get("scoreLead"),
-
             "visits": root_info.get("visits"),
-
             "move_infos": move_infos,
-
         }
 
     @staticmethod
