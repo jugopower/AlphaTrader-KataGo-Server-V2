@@ -205,7 +205,6 @@ root_info = result.get("rootInfo", {})
 move_infos = result.get("moveInfos", [])
 
 if not move_infos:
-
     return {
 
         "status": "error",
