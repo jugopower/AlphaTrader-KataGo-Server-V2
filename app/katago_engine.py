@@ -257,13 +257,25 @@ class KataGoEngine:
 
             elif isinstance(move, (list, tuple)) and len(move) >= 2:
 
-                color, coordinate = str(move[0]).upper(), str(move[1])
+                color, coordinate = str(move[0]).upper(), str(move[1])                        
 
-            else:
+            else:        
 
-                color = "B" if index % 2 == 0 else "W"
+                raw_move = str(move).strip()
 
-                coordinate = str(move)
+                if len(raw_move) >= 2 and raw_move[0].upper() in {"B", "W"}:
+
+                 color = raw_move[0].upper()
+
+                 coordinate = raw_move[1:].strip()
+
+             else:
+
+                 color = "B" if index % 2 == 0 else "W"
+
+                 coordinate = raw_move
+
+                
 
             converted.append([color, coordinate])
 
