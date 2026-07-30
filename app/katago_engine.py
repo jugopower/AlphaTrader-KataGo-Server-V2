@@ -187,42 +187,60 @@ class KataGoEngine:
             }
 
         result = json.loads(output_lines[-1])
-if result.get("error"):
 
-    return {
+        if result.get("error"):
 
-        "status": "error",
+            return {
 
-        "mode": "katago",
+                "status": "error",
 
-        "message": result.get("error"),
+                "mode": "katago",
 
-        "katago_raw": result,
+                "message": result.get("error"),
 
-    }
+                "katago_raw": result,
 
-root_info = result.get("rootInfo", {})
-move_infos = result.get("moveInfos", [])
+            }
 
-if not move_infos:
-    return {
-        "status": "error",
-        "mode": "katago",
-        "message": "KataGo 沒有回傳推薦落點",
-        "katago_raw": result,
-    }       
- return {
+        root_info = result.get("rootInfo", {})
+
+        move_infos = result.get("moveInfos", [])
+
+        if not move_infos:
+
+            return {
+
+                "status": "error",
+
+                "mode": "katago",
+
+                "message": "KataGo 沒有回傳推薦落點",
+
+                "katago_raw": result,
+
+            }
+
+        return {
+
             "status": "ok",
-            "mode": "katago",
-            "board_size": board_size,
-            "move_count": len(moves),
-            "next_player": next_player,
-            "winrate": root_info.get("winrate"),
-            "score_lead": root_info.get("scoreLead"),
-            "visits": root_info.get("visits"),
-            "move_infos": move_infos,
-        }
 
+            "mode": "katago",
+
+            "board_size": board_size,
+
+            "move_count": len(moves),
+
+            "next_player": next_player,
+
+            "winrate": root_info.get("winrate"),
+
+            "score_lead": root_info.get("scoreLead"),
+
+            "visits": root_info.get("visits"),
+
+            "move_infos": move_infos,
+
+        }
     @staticmethod
 
     def _convert_moves(moves: list[Any]) -> list[list[str]]:
