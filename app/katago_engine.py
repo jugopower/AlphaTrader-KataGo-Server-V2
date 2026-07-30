@@ -249,7 +249,7 @@ class KataGoEngine:
 
         for index, move in enumerate(moves):
 
-            if isinstance(move, dict):
+           if isinstance(move, dict):
 
                 color = str(move.get("color", "B")).upper()
 
@@ -271,9 +271,9 @@ class KataGoEngine:
 
              else:
 
-                 color = "B" if index % 2 == 0 else "W"
+                     color = "B" if index % 2 == 0 else "W"
 
-                 coordinate = raw_move
+                     coordinate = raw_move
 
                 
 
