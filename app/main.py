@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.katago_engine import KataGoEngine
 
-BUILD = "Build020.5"
+BUILD = "Build026.0"
 
-app = FastAPI(title="AlphaTrader KataGo Server V2", version="0.2.5")
+app = FastAPI(title="AlphaTrader KataGo Server V2", version="0.26.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,10 +30,16 @@ class MoveInput(BaseModel):
 class AnalyzeRequest(BaseModel):
     board_size: Literal[9, 13, 19] = 19
     moves: list[Union[str, MoveInput]] = Field(default_factory=list)
-    initial_stones: list[StoneInput] = Field(default_factory=list)
+    # Accept both object form and compact ["B", "D4"] form from the frontend.
+    initial_stones: list[Any] = Field(default_factory=list)
     next_player: Literal["B", "W"] = "B"
     komi: float = 7.5
     max_visits: int = Field(default=50, ge=1, le=5000)
+
+class VerifyLifeDeathRequest(AnalyzeRequest):
+    question_no: str = ""
+    problem_type: Literal["black_kill_white", "white_kill_black", "black_live", "white_live"] = "black_kill_white"
+    verification_visits: int = Field(default=300, ge=50, le=2000)
 
 @app.get("/")
 def root() -> dict[str, Any]:
@@ -51,7 +57,34 @@ def engine_status() -> dict[str, Any]:
 @app.post("/analyze")
 def analyze(request: AnalyzeRequest) -> dict[str, Any]:
     moves = [m if isinstance(m, str) else m.model_dump() for m in request.moves]
-    initial_stones = [s.model_dump() for s in request.initial_stones]
+    initial_stones: list[dict[str, str]] = []
+    for index, stone in enumerate(request.initial_stones):
+        color = "B"
+        coordinate = ""
+
+        if isinstance(stone, StoneInput):
+            color = stone.color
+            coordinate = stone.coordinate
+        elif isinstance(stone, dict):
+            color = str(stone.get("color", stone.get("player", "B"))).upper().strip()
+            coordinate = str(
+                stone.get("coordinate", stone.get("vertex", stone.get("move", "")))
+            ).strip()
+        elif isinstance(stone, (list, tuple)) and len(stone) >= 2:
+            color = str(stone[0]).upper().strip()
+            coordinate = str(stone[1]).strip()
+        elif isinstance(stone, str):
+            raw = stone.strip()
+            if raw and raw[0].upper() in {"B", "W"}:
+                color = raw[0].upper()
+                coordinate = raw[1:].lstrip(" ,:").strip()
+
+        if color not in {"B", "W"}:
+            color = "B" if index % 2 == 0 else "W"
+
+        if coordinate:
+            initial_stones.append({"color": color, "coordinate": coordinate})
+
     result = engine.analyze(
         board_size=request.board_size,
         moves=moves,
@@ -62,3 +95,45 @@ def analyze(request: AnalyzeRequest) -> dict[str, Any]:
     )
     result["build"] = BUILD
     return result
+
+
+@app.post("/verify-life-death")
+def verify_life_death(request: VerifyLifeDeathRequest) -> dict[str, Any]:
+    moves = [m if isinstance(m, str) else m.model_dump() for m in request.moves]
+    initial_stones: list[dict[str, str]] = []
+    for index, stone in enumerate(request.initial_stones):
+        color = "B"
+        coordinate = ""
+        if isinstance(stone, StoneInput):
+            color, coordinate = stone.color, stone.coordinate
+        elif isinstance(stone, dict):
+            color = str(stone.get("color", stone.get("player", "B"))).upper().strip()
+            coordinate = str(stone.get("coordinate", stone.get("vertex", stone.get("move", "")))).strip()
+        elif isinstance(stone, (list, tuple)) and len(stone) >= 2:
+            color, coordinate = str(stone[0]).upper().strip(), str(stone[1]).strip()
+        elif isinstance(stone, str):
+            raw = stone.strip()
+            if raw and raw[0].upper() in {"B", "W"}:
+                color, coordinate = raw[0].upper(), raw[1:].lstrip(" ,:").strip()
+        if color not in {"B", "W"}:
+            color = "B" if index % 2 == 0 else "W"
+        if coordinate:
+            initial_stones.append({"color": color, "coordinate": coordinate})
+
+    next_player = "W" if request.problem_type.startswith("white_") else "B"
+    result = engine.analyze(
+        board_size=request.board_size,
+        moves=moves,
+        initial_stones=initial_stones,
+        next_player=next_player,
+        komi=request.komi,
+        max_visits=request.verification_visits,
+        timeout_seconds=90.0,
+    )
+    report = engine.build_life_death_report(
+        result=result,
+        question_no=request.question_no,
+        problem_type=request.problem_type,
+    )
+    report["build"] = BUILD
+    return report
