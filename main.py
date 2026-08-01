@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.katago_engine import KataGoEngine
 
-BUILD = "Build025.1"
+BUILD = "Build025.1.1"
 
-app = FastAPI(title="AlphaTrader KataGo Server V2", version="0.25.1")
+app = FastAPI(title="AlphaTrader KataGo Server V2", version="0.25.1.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
