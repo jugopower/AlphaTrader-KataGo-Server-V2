@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.katago_engine import KataGoEngine
 
-BUILD = "Build026.0"
+BUILD = "Build026.1"
 
-app = FastAPI(title="AlphaTrader KataGo Server V2", version="0.26.0")
+app = FastAPI(title="AlphaTrader KataGo Server V2", version="0.26.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -40,6 +40,8 @@ class VerifyLifeDeathRequest(AnalyzeRequest):
     question_no: str = ""
     problem_type: Literal["black_kill_white", "white_kill_black", "black_live", "white_live"] = "black_kill_white"
     verification_visits: int = Field(default=300, ge=50, le=2000)
+    target_coordinate: str = Field(min_length=2, max_length=4)
+    region_radius: int = Field(default=4, ge=2, le=8)
 
 @app.get("/")
 def root() -> dict[str, Any]:
@@ -121,6 +123,13 @@ def verify_life_death(request: VerifyLifeDeathRequest) -> dict[str, Any]:
             initial_stones.append({"color": color, "coordinate": coordinate})
 
     next_player = "W" if request.problem_type.startswith("white_") else "B"
+    try:
+        local_region = engine.local_region_from_target(
+            request.board_size, request.target_coordinate, request.region_radius
+        )
+    except ValueError as exc:
+        return {"status": "error", "mode": "life_death_verification", "message": str(exc), "build": BUILD}
+
     result = engine.analyze(
         board_size=request.board_size,
         moves=moves,
@@ -128,7 +137,8 @@ def verify_life_death(request: VerifyLifeDeathRequest) -> dict[str, Any]:
         next_player=next_player,
         komi=request.komi,
         max_visits=request.verification_visits,
-        timeout_seconds=90.0,
+        timeout_seconds=120.0,
+        local_region=local_region,
     )
     report = engine.build_life_death_report(
         result=result,

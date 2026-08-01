@@ -11,7 +11,7 @@ from typing import Any
 class KataGoEngine:
     """Persistent KataGo analysis engine.
 
-    Build 026.0 keeps one KataGo process alive and adds a preliminary life-and-death verification report.
+    Build 026.1 adds target-group selection and a local search region so KataGo does not recommend unrelated whole-board moves.
     Requests are serialized with a lock because one analysis subprocess reads
     and writes through a single stdin/stdout stream.
     """
@@ -100,6 +100,7 @@ class KataGoEngine:
         komi: float = 7.5,
         max_visits: int = 50,
         timeout_seconds: float = 45.0,
+        local_region: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         readiness = self.readiness()
         if not readiness["ready"]:
@@ -142,6 +143,20 @@ class KataGoEngine:
             "analysisPVLen": 2 if fast_play else 4,
             "maxVisits": effective_visits,
         }
+
+        # Build 026.1: restrict both players to the selected local region for
+        # the opening plies. This prevents whole-board moves such as D11 from
+        # being recommended for a corner tsumego.
+        if local_region:
+            allowed = list(local_region.get("allowed_moves") or [])
+            until_depth = max(1, min(int(local_region.get("until_depth", 20)), 100))
+            if allowed:
+                all_moves = self._all_board_coordinates(board_size) + ["pass"]
+                outside = [move for move in all_moves if move not in set(allowed)]
+                query["avoidMoves"] = [
+                    {"player": "B", "moves": outside, "untilDepth": until_depth},
+                    {"player": "W", "moves": outside, "untilDepth": until_depth},
+                ]
 
         started = time.perf_counter()
         with self._lock:
@@ -205,6 +220,7 @@ class KataGoEngine:
             # Human play only needs the best move. Deep analysis keeps all
             # candidates so the existing analysis panel remains unchanged.
             "move_infos": move_infos[:1] if fast_play else move_infos,
+            "local_region": local_region,
         }
 
 
@@ -269,7 +285,7 @@ class KataGoEngine:
         return {
             "status": "ok",
             "mode": "life_death_verification",
-            "verification_level": "preliminary",
+            "verification_level": "local_preliminary",
             "question_no": question_no,
             "problem_type": problem_type,
             "problem_label": labels.get(problem_type, problem_type),
@@ -285,7 +301,40 @@ class KataGoEngine:
             "candidates": candidates,
             "warnings": warnings,
             "teacher_decision_required": True,
+            "local_region": result.get("local_region"),
             "analysis": result,
+        }
+
+
+    @staticmethod
+    def _all_board_coordinates(board_size: int) -> list[str]:
+        letters = "ABCDEFGHJKLMNOPQRSTUVWXYZ"
+        return [f"{letters[x]}{board_size-y}" for y in range(board_size) for x in range(board_size)]
+
+    @staticmethod
+    def local_region_from_target(board_size: int, target_coordinate: str, radius: int) -> dict[str, Any]:
+        letters = "ABCDEFGHJKLMNOPQRSTUVWXYZ"
+        raw = (target_coordinate or "").upper().strip()
+        if len(raw) < 2 or raw[0] not in letters:
+            raise ValueError("目標座標格式不正確")
+        x = letters.index(raw[0])
+        try:
+            row = int(raw[1:])
+        except ValueError as exc:
+            raise ValueError("目標座標格式不正確") from exc
+        y = board_size - row
+        if not (0 <= x < board_size and 0 <= y < board_size):
+            raise ValueError("目標座標超出棋盤")
+        radius = max(2, min(int(radius), 8))
+        min_x, max_x = max(0, x-radius), min(board_size-1, x+radius)
+        min_y, max_y = max(0, y-radius), min(board_size-1, y+radius)
+        allowed = [f"{letters[ix]}{board_size-iy}" for iy in range(min_y,max_y+1) for ix in range(min_x,max_x+1)]
+        return {
+            "target_coordinate": raw,
+            "radius": radius,
+            "bounds": {"min_x": min_x, "max_x": max_x, "min_y": min_y, "max_y": max_y},
+            "allowed_moves": allowed,
+            "until_depth": 24,
         }
 
     def _send_and_receive(
