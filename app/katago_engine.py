@@ -11,7 +11,7 @@ from typing import Any
 class KataGoEngine:
     """Persistent KataGo analysis engine.
 
-    Build 026.1 adds target-group selection and a local search region so KataGo does not recommend unrelated whole-board moves.
+    Build 027 adds an automatic local principal-line solver; Build 026.1 added target-group selection and a local search region so KataGo does not recommend unrelated whole-board moves.
     Requests are serialized with a lock because one analysis subprocess reads
     and writes through a single stdin/stdout stream.
     """
@@ -221,6 +221,91 @@ class KataGoEngine:
             # candidates so the existing analysis panel remains unchanged.
             "move_infos": move_infos[:1] if fast_play else move_infos,
             "local_region": local_region,
+        }
+
+
+    def solve_life_death_line(
+        self,
+        board_size: int,
+        moves: list[Any],
+        initial_stones: list[dict[str, str]],
+        next_player: str,
+        komi: float,
+        visits_per_move: int,
+        max_moves: int,
+        local_region: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Generate one KataGo principal line by alternating best local moves.
+
+        This is a practical teaching-line generator, not a mathematical proof of
+        life, death, ko, or uniqueness. Every ply is re-analysed from the new
+        position, so the defender also receives KataGo's strongest reply.
+        """
+        line: list[dict[str, Any]] = []
+        working_moves = list(moves)
+        player = next_player if next_player in {"B", "W"} else "B"
+        total_elapsed = 0
+        stop_reason = "max_moves"
+        last_result: dict[str, Any] | None = None
+        seen: set[tuple[str, str]] = set()
+
+        for ply in range(max(1, min(int(max_moves), 30))):
+            result = self.analyze(
+                board_size=board_size,
+                moves=working_moves,
+                initial_stones=initial_stones,
+                next_player=player,
+                komi=komi,
+                max_visits=max(10, min(int(visits_per_move), 1000)),
+                timeout_seconds=120.0,
+                local_region=local_region,
+            )
+            last_result = result
+            total_elapsed += int(result.get("elapsed_ms", 0) or 0)
+            if result.get("status") != "ok":
+                stop_reason = "analysis_error"
+                break
+            infos = list(result.get("move_infos") or [])
+            if not infos:
+                stop_reason = "no_move"
+                break
+            best = infos[0]
+            move = str(best.get("move", "pass") or "pass")
+            if move.lower() == "pass":
+                stop_reason = "pass"
+                break
+            key = (player, move.upper())
+            if key in seen:
+                stop_reason = "repeated_move"
+                break
+            seen.add(key)
+            item = {
+                "number": ply + 1,
+                "color": player,
+                "move": move.upper(),
+                "visits": int(best.get("visits", best.get("edgeVisits", 0)) or 0),
+                "winrate": best.get("winrate"),
+                "score_lead": best.get("scoreLead", best.get("scoreMean")),
+            }
+            line.append(item)
+            working_moves.append({"color": player, "coordinate": move})
+            player = "W" if player == "B" else "B"
+
+        return {
+            "status": "ok" if line else "error",
+            "mode": "life_death_solution_line",
+            "solution_level": "katago_principal_line",
+            "line": line,
+            "move_count": len(line),
+            "next_player": player,
+            "stop_reason": stop_reason,
+            "elapsed_ms": total_elapsed,
+            "last_analysis": last_result,
+            "local_region": local_region,
+            "warnings": [
+                "此為 KataGo 局部主變化，用於快速顯示解題手順。",
+                "主變化不等同淨殺、劫殺、雙活或唯一解的完整證明。",
+            ],
         }
 
 
