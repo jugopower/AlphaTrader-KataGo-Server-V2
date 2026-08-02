@@ -11,7 +11,7 @@ from typing import Any
 class KataGoEngine:
     """Persistent KataGo analysis engine.
 
-    Build 027 adds an automatic local principal-line solver; Build 026.1 added target-group selection and a local search region so KataGo does not recommend unrelated whole-board moves.
+    Build 027.1 hardens the automatic local principal-line solver with strict local bounds, legal-move replay, target-group capture detection, and an exact answer-move limit.
     Requests are serialized with a lock because one analysis subprocess reads
     and writes through a single stdin/stdout stream.
     """
@@ -234,22 +234,37 @@ class KataGoEngine:
         visits_per_move: int,
         max_moves: int,
         local_region: dict[str, Any],
+        target_coordinate: str,
+        problem_type: str,
     ) -> dict[str, Any]:
-        """Generate one KataGo principal line by alternating best local moves.
+        """Generate one strictly-local KataGo teaching line.
 
-        This is a practical teaching-line generator, not a mathematical proof of
-        life, death, ko, or uniqueness. Every ply is re-analysed from the new
-        position, so the defender also receives KataGo's strongest reply.
+        Build 027.1 replays every move on a small Go rules engine, rejects any
+        move outside the selected region, never returns more than max_moves,
+        and stops immediately when the selected target stone is captured.
+        This remains a principal variation, not a proof of life or uniqueness.
         """
+        limit = max(1, min(int(max_moves), 30))
+        allowed = {str(m).upper() for m in (local_region.get("allowed_moves") or [])}
+        board = self._position_board(board_size, initial_stones, moves)
+        target_xy = self._gtp_to_xy(board_size, target_coordinate)
+        if target_xy is None:
+            return {"status": "error", "mode": "life_death_solution_line", "message": "目標座標格式不正確"}
+        tx, ty = target_xy
+        target_color = board[ty][tx]
+        if target_color not in {"B", "W"}:
+            return {"status": "error", "mode": "life_death_solution_line", "message": "目標座標上沒有棋子"}
+
         line: list[dict[str, Any]] = []
         working_moves = list(moves)
         player = next_player if next_player in {"B", "W"} else "B"
         total_elapsed = 0
         stop_reason = "max_moves"
         last_result: dict[str, Any] | None = None
-        seen: set[tuple[str, str]] = set()
+        previous_hash: str | None = None
+        current_hash = self._board_hash(board)
 
-        for ply in range(max(1, min(int(max_moves), 30))):
+        for ply in range(limit):
             result = self.analyze(
                 board_size=board_size,
                 moves=working_moves,
@@ -269,44 +284,158 @@ class KataGoEngine:
             if not infos:
                 stop_reason = "no_move"
                 break
-            best = infos[0]
-            move = str(best.get("move", "pass") or "pass")
-            if move.lower() == "pass":
-                stop_reason = "pass"
+
+            chosen = None
+            for candidate in infos:
+                coordinate = str(candidate.get("move", "") or "").upper()
+                if coordinate and coordinate != "PASS" and coordinate in allowed:
+                    xy = self._gtp_to_xy(board_size, coordinate)
+                    if xy is None:
+                        continue
+                    trial = self._play_move(board, player, xy[0], xy[1], previous_hash)
+                    if trial is not None:
+                        chosen = (candidate, coordinate, trial)
+                        break
+            if chosen is None:
+                stop_reason = "no_legal_local_move"
                 break
-            key = (player, move.upper())
-            if key in seen:
-                stop_reason = "repeated_move"
-                break
-            seen.add(key)
+
+            best, move, new_board = chosen
             item = {
-                "number": ply + 1,
+                "number": len(line) + 1,
                 "color": player,
-                "move": move.upper(),
+                "move": move,
                 "visits": int(best.get("visits", best.get("edgeVisits", 0)) or 0),
                 "winrate": best.get("winrate"),
                 "score_lead": best.get("scoreLead", best.get("scoreMean")),
             }
             line.append(item)
             working_moves.append({"color": player, "coordinate": move})
+            previous_hash, current_hash = current_hash, self._board_hash(new_board)
+            board = new_board
+
+            # The original target coordinate disappears only when its group is captured.
+            if board[ty][tx] != target_color:
+                stop_reason = "target_captured"
+                break
             player = "W" if player == "B" else "B"
+
+        objective = "kill" if "kill" in problem_type else "live"
+        target_captured = board[ty][tx] != target_color
+        if objective == "kill" and target_captured:
+            conclusion = "目標棋群已被提掉；此主變化達成殺棋。"
+        elif objective == "kill":
+            conclusion = "在指定手數內尚未提掉目標棋群。"
+        else:
+            conclusion = "已產生局部做活主變化；兩眼、劫活或雙活仍需老師確認。"
 
         return {
             "status": "ok" if line else "error",
             "mode": "life_death_solution_line",
-            "solution_level": "katago_principal_line",
-            "line": line,
-            "move_count": len(line),
+            "solution_level": "strict_local_principal_line",
+            "line": line[:limit],
+            "move_count": min(len(line), limit),
+            "max_solution_moves": limit,
             "next_player": player,
             "stop_reason": stop_reason,
             "elapsed_ms": total_elapsed,
             "last_analysis": last_result,
             "local_region": local_region,
+            "target_coordinate": target_coordinate.upper(),
+            "target_color": target_color,
+            "target_captured": target_captured,
+            "conclusion": conclusion,
             "warnings": [
-                "此為 KataGo 局部主變化，用於快速顯示解題手順。",
-                "主變化不等同淨殺、劫殺、雙活或唯一解的完整證明。",
+                "所有解答手均已限制在選定局部範圍，並經合法落子重播檢查。",
+                "此為 KataGo 局部主變化；唯一解、劫爭與做活證明仍需老師確認。",
             ],
         }
+
+    @staticmethod
+    def _gtp_to_xy(board_size: int, coordinate: str) -> tuple[int, int] | None:
+        letters = "ABCDEFGHJKLMNOPQRSTUVWXYZ"
+        raw = (coordinate or "").upper().strip()
+        if raw == "PASS" or len(raw) < 2 or raw[0] not in letters:
+            return None
+        try:
+            row = int(raw[1:])
+        except ValueError:
+            return None
+        x, y = letters.index(raw[0]), board_size - row
+        return (x, y) if 0 <= x < board_size and 0 <= y < board_size else None
+
+    @staticmethod
+    def _board_hash(board: list[list[str | None]]) -> str:
+        return "".join("." if c is None else c for row in board for c in row)
+
+    @classmethod
+    def _position_board(cls, board_size: int, initial_stones: list[dict[str, str]], moves: list[Any]) -> list[list[str | None]]:
+        board: list[list[str | None]] = [[None for _ in range(board_size)] for _ in range(board_size)]
+        for stone in initial_stones:
+            xy = cls._gtp_to_xy(board_size, str(stone.get("coordinate", "")))
+            color = str(stone.get("color", "")).upper()
+            if xy and color in {"B", "W"}:
+                board[xy[1]][xy[0]] = color
+        previous_hash = None
+        for raw in moves:
+            if isinstance(raw, dict):
+                color = str(raw.get("color", raw.get("player", ""))).upper()
+                coord = str(raw.get("coordinate", raw.get("move", "")))
+            elif isinstance(raw, str):
+                parts = raw.replace(",", " ").split()
+                color, coord = (parts[0].upper(), parts[1]) if len(parts) >= 2 else ("", "")
+            else:
+                continue
+            xy = cls._gtp_to_xy(board_size, coord)
+            if color in {"B", "W"} and xy:
+                new_board = cls._play_move(board, color, xy[0], xy[1], previous_hash)
+                if new_board is not None:
+                    previous_hash = cls._board_hash(board)
+                    board = new_board
+        return board
+
+    @classmethod
+    def _play_move(cls, board: list[list[str | None]], color: str, x: int, y: int, ko_hash: str | None) -> list[list[str | None]] | None:
+        size = len(board)
+        if not (0 <= x < size and 0 <= y < size) or board[y][x] is not None:
+            return None
+        result = [row[:] for row in board]
+        result[y][x] = color
+        enemy = "W" if color == "B" else "B"
+        for nx, ny in cls._neighbors(size, x, y):
+            if result[ny][nx] == enemy:
+                group, liberties = cls._group_and_liberties(result, nx, ny)
+                if not liberties:
+                    for gx, gy in group:
+                        result[gy][gx] = None
+        _, own_liberties = cls._group_and_liberties(result, x, y)
+        if not own_liberties:
+            return None
+        if ko_hash is not None and cls._board_hash(result) == ko_hash:
+            return None
+        return result
+
+    @staticmethod
+    def _neighbors(size: int, x: int, y: int) -> list[tuple[int, int]]:
+        return [(nx, ny) for nx, ny in ((x-1,y),(x+1,y),(x,y-1),(x,y+1)) if 0 <= nx < size and 0 <= ny < size]
+
+    @classmethod
+    def _group_and_liberties(cls, board: list[list[str | None]], x: int, y: int) -> tuple[set[tuple[int,int]], set[tuple[int,int]]]:
+        color = board[y][x]
+        if color is None:
+            return set(), set()
+        group, liberties, stack = set(), set(), [(x, y)]
+        while stack:
+            px, py = stack.pop()
+            if (px, py) in group:
+                continue
+            group.add((px, py))
+            for nx, ny in cls._neighbors(len(board), px, py):
+                if board[ny][nx] is None:
+                    liberties.add((nx, ny))
+                elif board[ny][nx] == color and (nx, ny) not in group:
+                    stack.append((nx, ny))
+        return group, liberties
 
 
     @staticmethod

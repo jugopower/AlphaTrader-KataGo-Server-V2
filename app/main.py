@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.katago_engine import KataGoEngine
 
-BUILD = "Build027.0"
+BUILD = "Build027.1"
 
-app = FastAPI(title="AlphaTrader KataGo Server V2", version="0.27.0")
+app = FastAPI(title="AlphaTrader KataGo Server V2", version="0.27.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -196,6 +196,8 @@ def solve_life_death(request: SolveLifeDeathRequest) -> dict[str, Any]:
         visits_per_move=request.visits_per_move,
         max_moves=request.max_solution_moves,
         local_region=local_region,
+        target_coordinate=request.target_coordinate,
+        problem_type=request.problem_type,
     )
     result.update({
         "build": BUILD,
