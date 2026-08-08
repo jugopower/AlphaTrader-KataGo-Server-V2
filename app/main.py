@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.katago_engine import KataGoEngine
+from monitor_api import router as monitor_router, analysis_request_started, analysis_request_finished
 
 BUILD = "Build027.1"
 
@@ -16,6 +17,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(monitor_router)
 
 engine = KataGoEngine()
 
@@ -95,16 +98,20 @@ def analyze(request: AnalyzeRequest) -> dict[str, Any]:
         if coordinate:
             initial_stones.append({"color": color, "coordinate": coordinate})
 
-    result = engine.analyze(
-        board_size=request.board_size,
-        moves=moves,
-        initial_stones=initial_stones,
-        next_player=request.next_player,
-        komi=request.komi,
-        max_visits=request.max_visits,
-    )
-    result["build"] = BUILD
-    return result
+    analysis_request_started()
+    try:
+        result = engine.analyze(
+            board_size=request.board_size,
+            moves=moves,
+            initial_stones=initial_stones,
+            next_player=request.next_player,
+            komi=request.komi,
+            max_visits=request.max_visits,
+        )
+        result["build"] = BUILD
+        return result
+    finally:
+        analysis_request_finished()
 
 
 @app.post("/verify-life-death")
