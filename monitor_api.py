@@ -181,3 +181,23 @@ def queue_leave():
             "queue": _katago_waiting,
 
         }
+
+def analysis_request_started() -> None:
+    """Record one analysis HTTP request. One KataGo process is serialized, so extras are queued."""
+    global _katago_active, _katago_waiting
+    with _lock:
+        if _katago_active == 0:
+            _katago_active = 1
+        else:
+            _katago_waiting += 1
+
+def analysis_request_finished() -> None:
+    """Release one analysis request and promote the next queued request, if any."""
+    global _katago_active, _katago_waiting
+    with _lock:
+        if _katago_waiting > 0:
+            _katago_waiting -= 1
+            _katago_active = 1
+        else:
+            _katago_active = 0
+
